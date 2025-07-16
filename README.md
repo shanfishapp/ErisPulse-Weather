@@ -25,8 +25,13 @@ pip install ErisPulse-Weather
 接下来可能会支持的功能：  
 - [ ] 自定义平台获取
 - [ ] 配置哪些内容不展示
-- [ ] 使用MarkDown发送
+- [ ] 使用MarkDown发送消息内容
+如果您有任何建议或想法，欢迎提交issues和pr给我们的仓库。
 
 > **有关Markdown的一些信息**：  
 > 1.仅可用于支持Markdown消息的平台，如果不支持则直接发送文本  
 > 2.[什么是Markdown？点我了解](https://markdown.com.cn/intro.html)
+
+# 参考链接
+- [ErisPulse 主库](https://www.github.com/ErisPulse/ErisPulse)
+- [ErisPulse 官方文档](https://www.erisdev.com)
