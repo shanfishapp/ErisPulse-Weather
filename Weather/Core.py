@@ -135,40 +135,32 @@ class Main:
             async with aiohttp.ClientSession() as session:
                 async with session.get(f"https://api.52vmy.cn/api/query/tian?city={city}") as resp:
                     if resp.status != 200:
-                        await sender.Text(f"""
-🔴天气查询失败
-错误码：{resp.status}
-错误原因：API状态码错误
-                    """)
+                        await sender.Text("🔴天气查询失败\n错误码：{resp.status}\n错误原因：API状态码错误")
                         return None
                     weather_data = await resp.json()
                     if weather_data['code'] == 200:
                         weather_json = weather_data['data']['current']
-                        weather_msg = f"""
-⛅天气数据
-🏙️当前城市：{weather_json['city']}/{weather_json['cityEnglish']}
-⛅当前天气：{weather_json['weather']}/{weather_json['weatherEnglish']}
-🧭当前风速：{weather_json['wind']} {weather_json['windSpeed']}
-🌡️当前温度：{weather_json['temp']}°C
-💦当前湿度：{weather_json['humidity']}
-⚖️大气压强：{weather_json['pressure']}
-🏭空气指数：{weather_json['air']}(PM2.5指数：{weather_json['air_pm25']})
-⏰更新时间：{weather_json['date']} {weather_json['time']}
-                        """
+                        weather_msg = (
+                            f"⛅天气数据\n"
+                            f"🏙️当前城市：{weather_json['city']}/{weather_json['cityEnglish']}\n"
+                            f"⛅当前天气：{weather_json['weather']}/{weather_json['weatherEnglish']}\n"
+                            f"🧭当前风速：{weather_json['wind']} {weather_json['windSpeed']}\n"
+                            f"🌡️当前温度：{weather_json['temp']}°C\n"
+                            f"💦当前湿度：{weather_json['humidity']}\n"
+                            f"⚖️大气压强：{weather_json['pressure']}\n"
+                            f"🏭空气指数：{weather_json['air']}(PM2.5指数：{weather_json['air_pm25']})\n"
+                            f"⏰更新时间：{weather_json['date']} {weather_json['time']}"
+                        )
                     else:
-                        weather_msg = f"""
-🔴天气API返回错误
-错误码：{weather_data['code']}
-错误原因：{weather_data['text']}
-请尝试重新获取。
-                        """
+                        weather_msg = (
+                            f"🔴天气API返回错误\n"
+                            f"错误码：{weather_data['code']}\n"
+                            f"错误原因：{weather_data['text']}\n"
+                            f"请尝试重新获取。"
+                        )
                     await sender.Text(weather_msg)
         except Exception as e:
-            await sender.Text(f"""
-🔴天气查询失败
-错误原因：{str(e)}
-请尝试重新获取。如有问题，请及时上报管理员。
-            """)
+            await sender.Text(f"🔴天气查询失败\n错误原因：{str(e)}\n请尝试重新获取。如有问题，请及时上报管理员。")
     
     async def _five_day_weather(self, msg):
         sender = await self._get_adapter_sender()
@@ -181,34 +173,26 @@ class Main:
             async with aiohttp.ClientSession() as session:
                 async with session.get(f"https://api.yyy001.com/api/weather?msg={city}") as resp:
                     if resp.status != 200:
-                        await sender.Text(f"""
-🔴天气查询失败
-错误码：{resp.status}
-错误原因：API状态码错误
-                    """)
+                        await sender.Text("🔴天气查询失败\n错误码：{resp.status}\n错误原因：API状态码错误")
                         return None
                     weather_data = await resp.json()
                     if weather_data['code'] == 200:
-                        weather_forecast = weather_data['data']['moji']['data']['forecast']  # 修正了拼写错误: forecasr -> forecast
+                        weather_forecast = weather_data['data']['moji']['data']['forecast']
                         weather_msg = f"⛅{weather_data['data']['moji']['data']['city']} 的未来五日天气预报\n"
                         for i in weather_forecast:
-                            weather_msg += f"""
-📆{i['date']}   {i['temperature']}
-早 {i['dayWeather']} 晚 {i['nightWeather']}
-早 {i['windDay']}  晚 {i['windNight']}
-湿度 {i['humidity']} 空气质量{i['airQuality']}
-                            """           
+                            weather_msg += (
+                                f"\n📆{i['date']}   {i['temperature']}\n"
+                                f"天气：早 {i['dayWeather']}         晚 {i['nightWeather']}\n"
+                                f"风速：早 {i['windDay']}  晚 {i['windNight']}\n"
+                                f"湿度 {i['humidity']} 空气质量{i['airQuality']}"
+                            )           
                     else:
-                        weather_msg = f"""
-🔴天气API返回错误
-错误码：{weather_data['code']}
-错误原因：{weather_data['msg']}
-请尝试重新获取。
-                        """
+                        weather_msg = (
+                            f"🔴天气API返回错误\n"
+                            f"错误码：{weather_data['code']}\n"
+                            f"错误原因：{weather_data['msg']}\n"
+                            f"请尝试重新获取。"
+                        )
                     await sender.Text(weather_msg)
         except Exception as e:
-            await sender.Text(f"""
-🔴天气查询失败
-错误原因：{str(e)}
-请尝试重新获取。如有问题，请及时上报管理员。
-            """)
+            await sender.Text(f"🔴天气查询失败\n错误原因：{str(e)}\n请尝试重新获取。如有问题，请及时上报管理员。")
