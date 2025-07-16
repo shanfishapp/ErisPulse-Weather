@@ -1,0 +1,20 @@
+[project]
+name = "ErisPulse-Weather"     # 模块名称, 建议使用 ErisPulse-<模块名称> 的格式命名
+version = "1.0.0"
+description = "天气查询，支持绑定城市、今日天气、五日天气"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [ { name = "ShanFish", email = "zcsfish@qq.com" } ]
+dependencies = [
+    "aiohttp"
+]
+
+[project.urls]
+"homepage" = "https://github.com/shanfishapp/ErisPulse-Weather"
+
+[project.entry-points]
+"erispulse.module" = { "Weather" = "Weather:Main" }
+
+[tool.flit.module]
+name = "Weather"

@@ -1,0 +1,33 @@
+# Python 缓存和编译文件
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 虚拟环境（如 venv、.venv、env 等）
+venv/
+.venv/
+env/
+
+# 构建和发布生成的文件（dist/, *.egg-info/）
+dist/
+*.egg-info/
+*.egg
+build/
+pip-wheel-metadata/
+
+# 测试和覆盖率文件（如果有测试）
+.coverage
+htmlcov/
+.pytest_cache/
+
+# IDE 和编辑器文件（如 VS Code、PyCharm）
+.vscode/
+.idea/
+*.iml
+
+# 系统文件（如 macOS 的 .DS_Store）
+.DS_Store
+
+# 本地配置文件（如 .env、敏感数据）
+.env
+*.secret
