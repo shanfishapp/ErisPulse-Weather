@@ -1,5 +1,6 @@
 import aiohttp
 import asyncio
+import time
 from ErisPulse import sdk
 
 class Main:
@@ -7,8 +8,9 @@ class Main:
         self.sdk = sdk
         self.logger = sdk.logger
         self.adapter = sdk.adapter
-        self.data = None  # 新增一个实例变量来存储当前的data
-        self.env = sdk.env  # 添加环境变量操作接口
+        self.data = None
+        self.env = sdk.env
+        self.failed_bindings = {}  # 存储绑定失败的用户信息 {user_id: {'city': city, 'time': timestamp}}
         
         self._register_handlers()
         
@@ -26,8 +28,8 @@ class Main:
             
         text = data.get("alt_message", "").strip().lower()
         if text.startswith("天气") or text.startswith("/天气"):
-            self.data = data  # 将data存储为实例变量
-            asyncio.create_task(self._handle_request())  # 移除参数，因为现在可以通过self访问
+            self.data = data
+            asyncio.create_task(self._handle_request())
 
     async def _get_adapter_sender(self):
         if not self.data:
@@ -53,6 +55,8 @@ class Main:
         msg = self.data.get("alt_message", "").lstrip("/").replace("天气", "", 1).strip()
         if msg.startswith("绑定"):
             return await self._bind_user_city(msg)
+        elif msg.startswith("强制绑定"):
+            return await self._force_bind_user_city(msg)
         elif msg.startswith("今日"):
             return await self._today_weather(msg)
         elif msg.startswith("五日"):
@@ -85,11 +89,81 @@ class Main:
                 await sender.Text("请提供要绑定的城市名称，例如：/天气 绑定 北京")
                 return
             
+            # 验证城市有效性
+            validation_result = await self._validate_city(city)
+            if not validation_result["valid"]:
+                # 存储失败信息
+                user_id = self.data.get("user_id")
+                self.failed_bindings[user_id] = {
+                    'city': city,
+                    'time': time.time()
+                }
+                await sender.Text(
+                    f"🔴城市验证失败\n错误原因：{validation_result['message']}\n"
+                    f"如果您确认城市没有问题，请在5分钟内使用'/天气 强制绑定 {city}'来强制绑定"
+                )
+                return
+            
+            # 验证通过，进行绑定
             user_id = self.data.get("user_id")
             self.env.set(f"weather:{user_id}", city)
             await sender.Text(f"成功绑定您的默认城市为: {city}\n以后可以直接使用'/天气 今日'或'/天气 五日'来查询")
         except Exception as e:
             await sender.Text(f"绑定城市失败: {str(e)}")
+    
+    async def _validate_city(self, city):
+        """验证城市是否有效"""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"https://api.52vmy.cn/api/query/tian?city={city}") as resp:
+                    if resp.status != 200:
+                        return {
+                            "valid": False,
+                            "message": f"API状态码错误: {resp.status}"
+                        }
+                    weather_data = await resp.json()
+                    if weather_data['code'] != 200:
+                        return {
+                            "valid": False,
+                            "message": weather_data['text']
+                        }
+                    return {"valid": True, "message": ""}
+        except Exception as e:
+            return {
+                "valid": False,
+                "message": str(e)
+            }
+    
+    async def _force_bind_user_city(self, msg):
+        """强制绑定用户城市"""
+        sender = await self._get_adapter_sender()
+        try:
+            user_id = self.data.get("user_id")
+            city = msg.replace("强制绑定", "", 1).strip()
+            
+            # 检查是否有对应的失败记录
+            if user_id not in self.failed_bindings:
+                await sender.Text("⚠️您还没有进行绑定，请先使用指令'/天气 绑定 城市名称'")
+                return
+                
+            # 检查城市是否匹配
+            failed_data = self.failed_bindings[user_id]
+            if city != failed_data['city']:
+                await sender.Text(f"⚠️您上次尝试绑定的城市是 {failed_data['city']}，请保持一致")
+                return
+                
+            # 检查是否超时(300秒=5分钟)
+            if time.time() - failed_data['time'] > 300:
+                del self.failed_bindings[user_id]  # 删除过期记录
+                await sender.Text("⚠️强制绑定已超时(超过5分钟)，请重新使用普通绑定命令")
+                return
+                
+            # 执行强制绑定
+            self.env.set(f"weather:{user_id}", city)
+            del self.failed_bindings[user_id]  # 绑定成功后删除记录
+            await sender.Text(f"⚠️已强制绑定您的默认城市为: {city}\n注意：由于跳过了城市验证，查询时可能出现错误")
+        except Exception as e:
+            await sender.Text(f"强制绑定城市失败: {str(e)}")
     
     async def _unbind_user_city(self):
         user_id = self.data.get("user_id")
@@ -106,11 +180,9 @@ class Main:
         
     async def _get_city_name(self, msg):
         """获取城市名称，优先使用传入的，其次使用绑定的"""
-        # 提取命令后的城市名称
         command = msg.split()[0] if msg else ""
         city = msg.replace(command, "", 1).strip()
         
-        # 如果用户没有输入城市，尝试获取绑定的城市
         if not city:
             user_id = self.data.get("user_id")
             city = self.env.get(f"weather:{user_id}", "")
@@ -135,8 +207,8 @@ class Main:
             async with aiohttp.ClientSession() as session:
                 async with session.get(f"https://api.52vmy.cn/api/query/tian?city={city}") as resp:
                     if resp.status != 200:
-                        await sender.Text("🔴天气查询失败\n错误码：{resp.status}\n错误原因：API状态码错误")
-                        return None
+                        await sender.Text(f"🔴天气查询失败\n错误码：{resp.status}\n错误原因：API状态码错误")
+                        return
                     weather_data = await resp.json()
                     if weather_data['code'] == 200:
                         weather_json = weather_data['data']['current']
@@ -156,7 +228,7 @@ class Main:
                             f"🔴天气API返回错误\n"
                             f"错误码：{weather_data['code']}\n"
                             f"错误原因：{weather_data['text']}\n"
-                            f"请尝试重新获取。"
+                            f"如果这是您的绑定城市，请尝试使用'/天气 解绑'解除绑定，然后重新绑定有效城市"
                         )
                     await sender.Text(weather_msg)
         except Exception as e:
@@ -173,8 +245,8 @@ class Main:
             async with aiohttp.ClientSession() as session:
                 async with session.get(f"https://api.yyy001.com/api/weather?msg={city}") as resp:
                     if resp.status != 200:
-                        await sender.Text("🔴天气查询失败\n错误码：{resp.status}\n错误原因：API状态码错误")
-                        return None
+                        await sender.Text(f"🔴天气查询失败\n错误码：{resp.status}\n错误原因：API状态码错误")
+                        return
                     weather_data = await resp.json()
                     if weather_data['code'] == 200:
                         weather_forecast = weather_data['data']['moji']['data']['forecast']
@@ -191,7 +263,7 @@ class Main:
                             f"🔴天气API返回错误\n"
                             f"错误码：{weather_data['code']}\n"
                             f"错误原因：{weather_data['msg']}\n"
-                            f"请尝试重新获取。"
+                            f"如果这是您的绑定城市，请尝试使用'/天气 解绑'解除绑定，然后重新绑定有效城市"
                         )
                     await sender.Text(weather_msg)
         except Exception as e:
