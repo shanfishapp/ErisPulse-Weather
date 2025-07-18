@@ -10,7 +10,8 @@ class Main:
         self.adapter = sdk.adapter
         self.data = None
         self.env = sdk.env
-        self.failed_bindings = {}  # 存储绑定失败的用户信息 {user_id: {'city': city, 'time': timestamp}}
+        self.pre_bindings = {}  # 预绑定列表 {user_id: {'city': city, 'time': timestamp, 'timer_task': task}}
+        self.timeout_seconds = 300  # 5分钟超时
         
         self._register_handlers()
         
@@ -89,15 +90,26 @@ class Main:
                 await sender.Text("请提供要绑定的城市名称，例如：/天气 绑定 北京")
                 return
             
+            user_id = self.data.get("user_id")
+            
+            # 如果已有预绑定记录，取消之前的超时任务
+            if user_id in self.pre_bindings:
+                old_task = self.pre_bindings[user_id].get('timer_task')
+                if old_task and not old_task.done():
+                    old_task.cancel()
+            
+            # 创建新的预绑定记录
+            timer_task = asyncio.create_task(self._handle_binding_timeout(user_id))
+            self.pre_bindings[user_id] = {
+                'city': city,
+                'time': time.time(),
+                'timer_task': timer_task,
+                'status': 'pending'  # pending, success, timeout
+            }
+            
             # 验证城市有效性
             validation_result = await self._validate_city(city)
             if not validation_result["valid"]:
-                # 存储失败信息
-                user_id = self.data.get("user_id")
-                self.failed_bindings[user_id] = {
-                    'city': city,
-                    'time': time.time()
-                }
                 await sender.Text(
                     f"🔴城市验证失败\n错误原因：{validation_result['message']}\n"
                     f"如果您确认城市没有问题，请在5分钟内使用'/天气 强制绑定 {city}'来强制绑定"
@@ -105,11 +117,35 @@ class Main:
                 return
             
             # 验证通过，进行绑定
-            user_id = self.data.get("user_id")
             self.env.set(f"weather:{user_id}", city)
+            self.pre_bindings[user_id]['status'] = 'success'
             await sender.Text(f"成功绑定您的默认城市为: {city}\n以后可以直接使用'/天气 今日'或'/天气 五日'来查询")
+            
         except Exception as e:
             await sender.Text(f"绑定城市失败: {str(e)}")
+            if user_id in self.pre_bindings:
+                self.pre_bindings[user_id]['status'] = 'error'
+    
+    async def _handle_binding_timeout(self, user_id):
+        """处理绑定超时"""
+        try:
+            await asyncio.sleep(self.timeout_seconds)
+            
+            # 检查是否仍然处于pending状态
+            if user_id in self.pre_bindings and self.pre_bindings[user_id]['status'] == 'pending':
+                city = self.pre_bindings[user_id]['city']
+                sender = await self._get_adapter_sender()
+                try:
+                    await sender.Text(f"⚠️您对城市 {city} 的绑定操作已超时(超过5分钟)，请重新使用绑定命令")
+                finally:
+                    self.pre_bindings[user_id]['status'] = 'timeout'
+                    # 不立即删除，保留记录一段时间供强制绑定参考
+                    
+        except asyncio.CancelledError:
+            # 任务被取消是正常情况
+            pass
+        except Exception as e:
+            self.logger.error(f"处理绑定超时出错: {str(e)}")
     
     async def _validate_city(self, city):
         """验证城市是否有效"""
@@ -141,29 +177,46 @@ class Main:
             user_id = self.data.get("user_id")
             city = msg.replace("强制绑定", "", 1).strip()
             
-            # 检查是否有对应的失败记录
-            if user_id not in self.failed_bindings:
+            # 检查是否有对应的预绑定记录
+            if user_id not in self.pre_bindings:
                 await sender.Text("⚠️您还没有进行绑定，请先使用指令'/天气 绑定 城市名称'")
                 return
                 
+            pre_binding = self.pre_bindings[user_id]
+            
             # 检查城市是否匹配
-            failed_data = self.failed_bindings[user_id]
-            if city != failed_data['city']:
-                await sender.Text(f"⚠️您上次尝试绑定的城市是 {failed_data['city']}，请保持一致")
+            if city != pre_binding['city']:
+                await sender.Text(f"⚠️您上次尝试绑定的城市是 {pre_binding['city']}，请保持一致")
                 return
                 
-            # 检查是否超时(300秒=5分钟)
-            if time.time() - failed_data['time'] > 300:
-                del self.failed_bindings[user_id]  # 删除过期记录
+            # 检查状态
+            if pre_binding['status'] == 'timeout':
                 await sender.Text("⚠️强制绑定已超时(超过5分钟)，请重新使用普通绑定命令")
                 return
                 
             # 执行强制绑定
             self.env.set(f"weather:{user_id}", city)
-            del self.failed_bindings[user_id]  # 绑定成功后删除记录
+            
+            # 取消超时任务
+            if 'timer_task' in pre_binding and not pre_binding['timer_task'].done():
+                pre_binding['timer_task'].cancel()
+                
+            # 更新状态
+            pre_binding['status'] = 'force_success'
+            
             await sender.Text(f"⚠️已强制绑定您的默认城市为: {city}\n注意：由于跳过了城市验证，查询时可能出现错误")
+            
         except Exception as e:
             await sender.Text(f"强制绑定城市失败: {str(e)}")
+    
+    async def _cleanup_pre_binding(self, user_id):
+        """清理预绑定记录"""
+        if user_id in self.pre_bindings:
+            # 取消超时任务
+            task = self.pre_bindings[user_id].get('timer_task')
+            if task and not task.done():
+                task.cancel()
+            del self.pre_bindings[user_id]
     
     async def _unbind_user_city(self):
         user_id = self.data.get("user_id")
@@ -174,6 +227,7 @@ class Main:
                 await sender.Text("目前没有绑定城市")
                 return
             self.env.delete(f"weather:{user_id}")
+            await self._cleanup_pre_binding(user_id)
             await sender.Text(f"成功删除当前绑定的城市：{city}")
         except Exception as e:
             await sender.Text(f"解绑城市失败：{str(e)}")
